@@ -1,5 +1,25 @@
-# Less Supervision, Better Generalization: Weakly Supervised Fake Region Localization in Diffusion-Edited Images
+# Less Supervision, Better Generalization: Weakly Supervised Fake Region Localization in Diffusion-Edited Images [NeurIPS'26]
 
-**Venue:** NeurIPS 2026
+**Official Repository for the NeurIPS 2026 paper "Less Supervision, Better Generalization"**
 
-**Authors:** Junhee Lee, Donghyeon Jeon, Taeoh Kim, Beomyoung Kim, MyeongAh Cho
+
+This repository hosts the official implementation of:
+
+**Less Supervision, Better Generalization: Weakly Supervised Fake Region Localization in Diffusion-Edited Images**
+
+## Authors
+Junhee Lee, Donghyeon Jeon, Taeoh Kim, Beomyoung Kim, MyeongAh Cho†  
+†Corresponding Author
+
+
+
+
+
+
+
+
+
+
+
+
+
