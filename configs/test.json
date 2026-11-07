@@ -1,0 +1,26 @@
+{
+  "extends": "base.json",
+  "mode": "test",
+  "runtime": {
+    "num_processes": 1,
+    "num_workers": 8,
+    "device": "cuda"
+  },
+  "model": {
+    "pred_calib_k_max": 1.0,
+    "smooth_w": 0.03
+  },
+  "evaluation": {
+    "batch_size": 16,
+    "pixel_classes": [
+      "partial"
+    ],
+    "run_image_eval": true,
+    "threshold": 0.5,
+    "max_batches": 0
+  },
+  "paths": {
+    "checkpoint": "./outputs/regflow/best.pth",
+    "output_dir": "./outputs/test"
+  }
+}

@@ -1,0 +1,2 @@
+-r requirements.txt
+diffusers==0.30.3
