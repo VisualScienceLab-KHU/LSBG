@@ -128,16 +128,21 @@ def train_epoch(model, loader, optimizer, scaler, epoch, config, runtime, *, log
 
 
 @torch.no_grad()
-def evaluate(
-    model, loader, runtime, *, pixel_mode=None, image_metrics=False, threshold=0.5, max_batches=0
-):
+def accumulate_metrics(model, loader, runtime, *metrics, max_batches=0):
     model.eval()
-    metrics = Metrics(
-        runtime.device, pixel_mode=pixel_mode, image=image_metrics, threshold=threshold
-    )
     steps = min(len(loader), max_batches) if max_batches else len(loader)
     for batch in islice(loader, steps):
         batch = move_batch(batch, runtime.device)
         output = model(image=batch["image"], recon_map=batch["recon_map"])
-        metrics.update(output, batch)
+        for metric in metrics:
+            metric.update(output, batch)
+
+
+def evaluate(
+    model, loader, runtime, *, pixel_mode=None, image_metrics=False, threshold=0.5, max_batches=0
+):
+    metrics = Metrics(
+        runtime.device, pixel_mode=pixel_mode, image=image_metrics, threshold=threshold
+    )
+    accumulate_metrics(model, loader, runtime, metrics, max_batches=max_batches)
     return metrics.compute()

@@ -40,7 +40,7 @@ SECTION_KEYS = {
         "image_lr_scale", "image_decay_after_epoch", "image_decay_factor",
     },
     "validation": {"batch_size", "max_batches", "threshold", "selection_split", "model_overrides"},
-    "evaluation": {"batch_size", "pixel_classes", "run_image_eval", "threshold", "max_batches"},
+    "evaluation": {"batch_size", "threshold"},
     "wandb": {"enabled", "mode", "project", "entity", "name", "group", "tags"},
 }
 
@@ -319,22 +319,7 @@ def validate_config(config):
         ):
             raise ValueError("wandb.tags must be a list of unique nonempty strings.")
     if mode == "test":
-        evaluation = config["evaluation"]
-        classes = evaluation["pixel_classes"]
-        if (
-            not isinstance(classes, list)
-            or not classes
-            or any(not isinstance(item, str) for item in classes)
-        ):
-            raise ValueError("evaluation.pixel_classes must be a nonempty list of class names.")
-        if len(set(classes)) != len(classes) or set(classes) - {"partial", "fully", "real"}:
-            raise ValueError(
-                "evaluation.pixel_classes must select partial, fully and/or real without duplicates."
-            )
-        _number(evaluation["batch_size"], "evaluation.batch_size", integer=True, strictly=True)
-        _number(evaluation["max_batches"], "evaluation.max_batches", integer=True)
-        if not isinstance(evaluation["run_image_eval"], bool):
-            raise ValueError("evaluation.run_image_eval must be true or false.")
+        _number(config["evaluation"]["batch_size"], "evaluation.batch_size", integer=True, strictly=True)
     for section in ("validation", "evaluation"):
         if section in config:
             _number(config[section]["threshold"], f"{section}.threshold")

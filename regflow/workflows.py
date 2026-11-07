@@ -14,11 +14,14 @@ from .data import (
     DistributedEvalSampler,
     OpenSDIDataset,
 )
-from .engine import evaluate, train_epoch
-from .metrics import average_domains
+from .engine import accumulate_metrics, evaluate, train_epoch
+from .metrics import Metrics, average_domains
 from .models import ReGFLoW
 from .runtime import seed_worker
 from .tracking import WandbTracker
+
+
+TEST_CATEGORIES = ("partial", "fully", "real")
 
 
 def build_dataset(config, split, *, training=False, classes=None, load_masks=True):
@@ -272,31 +275,29 @@ def test(config, runtime):
     model = build_model(config, runtime, checkpoint)
     del checkpoint
     settings = config["evaluation"]
-    pixel_mode = "per_image" if set(settings["pixel_classes"]) == {"partial"} else "entire_pixel"
+    threshold = settings["threshold"]
     results = {}
     for split in config["data"]["test_splits"]:
-        dataset = build_dataset(config, split, classes=settings["pixel_classes"])
-        loader = build_loader(dataset, settings["batch_size"], config, runtime)
-        scores = evaluate(
-            model,
-            loader,
-            runtime,
-            pixel_mode=pixel_mode,
-            threshold=settings["threshold"],
-            max_batches=settings["max_batches"],
-        )
-        results[split] = {"pixel": scores}
-        if settings["run_image_eval"]:
-            image_dataset = build_dataset(config, split, load_masks=False)
-            image_loader = build_loader(image_dataset, settings["batch_size"], config, runtime)
-            results[split]["image"] = evaluate(
-                model,
-                image_loader,
-                runtime,
-                image_metrics=True,
-                threshold=settings["threshold"],
-                max_batches=settings["max_batches"],
+        pixel_p = Metrics(runtime.device, pixel_mode="per_image", threshold=threshold)
+        pixel_pf = Metrics(runtime.device, pixel_mode="entire_pixel", threshold=threshold)
+        image = Metrics(runtime.device, image=True, threshold=threshold)
+        metrics_by_class = {
+            "partial": (pixel_p, image),
+            "fully": (pixel_pf, image),
+            "real": (image,),
+        }
+        for category in TEST_CATEGORIES:
+            dataset = build_dataset(
+                config, split, classes=[category], load_masks=category != "real"
             )
+            loader = build_loader(dataset, settings["batch_size"], config, runtime)
+            accumulate_metrics(model, loader, runtime, *metrics_by_class[category])
+        pixel_pf.include_pixels(pixel_p)
+        results[split] = {
+            "pixel_p": pixel_p.compute(),
+            "pixel_pf": pixel_pf.compute(),
+            "image": image.compute(),
+        }
         runtime.print(f"{split}: {json.dumps(results[split], sort_keys=True)}")
     split_names = list(config["data"]["test_splits"])
     results["avg_stats"] = average_domains(results, split_names)
@@ -304,11 +305,10 @@ def test(config, runtime):
         results, [name for name in split_names if name != "sd15"]
     )
     results["protocol"] = {
-        "pixel_classes": settings["pixel_classes"],
-        "pixel_mode": pixel_mode,
-        "image_classes": ["real", "fully", "partial"] if settings["run_image_eval"] else [],
-        "threshold": settings["threshold"],
-        "limited_batches": settings["max_batches"] > 0,
+        "pixel_p": {"classes": ["partial"], "mode": "per_image"},
+        "pixel_pf": {"classes": ["partial", "fully"], "mode": "entire_pixel"},
+        "image_classes": list(TEST_CATEGORIES),
+        "threshold": threshold,
         "model_calibration": {
             key: value for key, value in config["model"].items() if key.startswith("pred_calib_")
         },
@@ -326,10 +326,10 @@ def check_inputs(config, *, inspect_data=False):
     mode, paths = config["mode"], config["paths"]
     if mode == "train" and not config["training"]["resume"]:
         for path, hint in (
-            (paths["mae_checkpoint"], "Place the official MAE weight under weights/mae/ as shown in README section 1."),
+            (paths["mae_checkpoint"], "See 'Pretrained models' in README.md for the MAE weight."),
             (
                 str(Path(paths["clip_cache_dir"]) / "ViT-L-14.pt"),
-                "Place the official CLIP weight under weights/clip/ as shown in README section 1.",
+                "See 'Pretrained models' in README.md for the CLIP weight.",
             ),
         ):
             if not Path(path).is_file():
@@ -348,9 +348,8 @@ def check_inputs(config, *, inspect_data=False):
             requests.append((split, False, None, False))
     else:
         for split in config["data"]["test_splits"]:
-            requests.append((split, False, config["evaluation"]["pixel_classes"], True))
-            if config["evaluation"]["run_image_eval"]:
-                requests.append((split, False, None, False))
+            for category in TEST_CATEGORIES:
+                requests.append((split, False, [category], category != "real"))
     from .data import reconstruction_path
 
     for split, training, classes, masks in requests:

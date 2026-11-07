@@ -65,6 +65,10 @@ class Metrics:
                 )
             ).double()
 
+    def include_pixels(self, other):
+        """Pool pixel statistics from another disjoint subset before reduction."""
+        self.pixel_sums += other.pixel_sums
+
     def compute(self):
         result = {}
         if self.pixel_mode:
@@ -99,7 +103,7 @@ def average_domains(results, names):
     if not selected:
         return {}
     output = {}
-    for section in ("pixel", "image"):
+    for section in selected[0]:
         entries = [result[section] for result in selected if section in result]
         if not entries:
             continue

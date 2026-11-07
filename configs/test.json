@@ -12,12 +12,7 @@
   },
   "evaluation": {
     "batch_size": 16,
-    "pixel_classes": [
-      "partial"
-    ],
-    "run_image_eval": true,
-    "threshold": 0.5,
-    "max_batches": 0
+    "threshold": 0.5
   },
   "paths": {
     "checkpoint": "./outputs/regflow/best.pth",
