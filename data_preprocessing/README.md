@@ -17,10 +17,14 @@ Each RGB image is resized to 512 × 512 and reconstructed with one VAE encode/de
 
 ## Reuse maps or resume generation
 
-Set `reconstruction.root` to the directory **containing** `sd1_v1/`. Its default is `<paths.hf_home>/recon_maps`. The loader appends the original OpenSDI key, including any subdirectories and filename extension, followed by `.pt`. With the default configuration, the expected path is
+If all maps are present, proceed to [training or evaluation](../README.md). If generation was interrupted, rerun the same command. It fills missing files and preserves the posterior noise sequence across skipped batches.
+
+ReGFLoW expects one map for each original OpenSDI key, including its subdirectories and filename extension, followed by `.pt`:
 
 ```text
 <reconstruction.root>/sd1_v1/vae_l1_rgbmean_zreal_128/<key>.pt
 ```
 
-If all maps are present, proceed to [training or evaluation](../README.md). If generation was interrupted, rerun the same command. It fills missing files and preserves the posterior noise sequence across skipped batches.
+## Configure preprocessing paths
+
+Set `reconstruction.root` in [`configs/base.json`](../configs/base.json) to the directory **containing** `sd1_v1/`. Leave it as `null` to use `<paths.hf_home>/recon_maps`. The default `reconstruction.alias` (`sd1_v1`) and `reconstruction.name` (`vae_l1_rgbmean_zreal_128`) must match the names of your prepared map directories. The same configuration is inherited by both training and evaluation.

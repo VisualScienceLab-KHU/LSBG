@@ -1,5 +1,7 @@
 import argparse
+import os
 import random
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +9,10 @@ import torch
 import torch.distributed as dist
 
 from .config import optimizer_with_defaults
+
+
+# OOD Avg: equal-weight mean across the non-SD1.5 test domains, Pixel P F1.
+BEST_METRIC_NAME = "ood_avg_pixel_p_f1"
 
 
 def read_checkpoint(path):
@@ -71,6 +77,11 @@ def resume_training(checkpoint, optimizer, scaler, config, runtime):
             "Optimizer resume requires a checkpoint produced by this release. "
             "Legacy model weights can be evaluated with test.py, but their optimizer layout is not migrated."
         )
+    if checkpoint.get("best_metric_name") != BEST_METRIC_NAME:
+        raise ValueError(
+            "This checkpoint does not contain the OOD Pixel P selection history. "
+            "Start a new training run rather than resuming with an incompatible best-checkpoint criterion."
+        )
     previous = checkpoint["config"]
     if previous["model"] != config["model"] or (
         optimizer_with_defaults(previous["optimizer"]) != optimizer_with_defaults(config["optimizer"])
@@ -125,6 +136,7 @@ def resume_training(checkpoint, optimizer, scaler, config, runtime):
 def save_training_checkpoint(
     model, optimizer, scaler, epoch, best_metric, config, runtime, *, is_best=False
 ):
+    """Save resumable last.pth and update best.pth only when OOD Pixel P improves."""
     state = _rng_state(runtime.device)
     states = [None] * runtime.world_size
     if dist.is_initialized():
@@ -133,6 +145,7 @@ def save_training_checkpoint(
         states[0] = state
     if not runtime.is_main:
         return
+
     checkpoint = {
         "format_version": 1,
         "model": model.state_dict(),
@@ -140,17 +153,30 @@ def save_training_checkpoint(
         "scaler": scaler.state_dict(),
         "epoch": epoch,
         "best_metric": best_metric,
+        "best_metric_name": BEST_METRIC_NAME,
         "config": config,
         "rng_states": states,
     }
     output = Path(config["paths"]["output_dir"])
-    destinations = [output / "last.pth"]
+    output.mkdir(parents=True, exist_ok=True)
+    last = output / "last.pth"
+    temporary = output / "last.pth.tmp"
+    torch.save(checkpoint, temporary)
+    temporary.replace(last)
+
+    # A hard link avoids writing another large checkpoint. An atomic copy is
+    # used on filesystems that do not support linking.
+    destinations = []
     if is_best:
         destinations.append(output / "best.pth")
     period = config["training"]["save_every"]
     if period and (epoch + 1) % period == 0:
         destinations.append(output / f"epoch-{epoch + 1:03d}.pth")
     for path in destinations:
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        torch.save(checkpoint, temporary)
-        temporary.replace(path)
+        link_tmp = path.with_suffix(path.suffix + ".tmp")
+        link_tmp.unlink(missing_ok=True)
+        try:
+            os.link(last, link_tmp)
+        except OSError:
+            shutil.copyfile(last, link_tmp)
+        link_tmp.replace(path)

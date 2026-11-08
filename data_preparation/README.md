@@ -15,10 +15,22 @@ Activate the project environment and run this command from the repository root w
 python -m data_preparation.prepare_cache --config configs/train.json
 ```
 
-The default location is `./cache/huggingface/datasets`. To use another disk, set `data.cache_dir` in the shared configuration before running the command. Relative paths are resolved from the repository root. For evaluation alone, use `--config configs/test.json` to prepare the test dataset. [Base configuration](../configs/base.json)
+The default cache location is `./cache/huggingface/datasets`. For evaluation alone, use `--config configs/test.json` to prepare the test dataset.
 
 ## Reuse a prepared cache
 
-Point `data.cache_dir` to the cache root and preserve the directory hierarchy, including `dataset_info.json` and all Arrow shards. If several versions are present, set `data.train_prepared_dir` and `data.test_prepared_dir` to the respective directories containing `dataset_info.json`. The default training and test loaders read these files offline.
+Preserve the complete Hugging Face Arrow cache hierarchy, including `dataset_info.json` and all shards. The default training and test loaders read prepared files offline.
 
-Keep each OpenSDI `key` intact. ReGFLoW uses it to pair the image with its reconstruction map. Continue with [Data Preprocessing](../data_preprocessing/README.md).
+Keep each OpenSDI `key` intact. ReGFLoW uses it to pair the image with its reconstruction map.
+
+## Configure data paths
+
+Set the following fields in [`configs/base.json`](../configs/base.json), which is shared by training and evaluation. Paths are resolved relative to the repository root.
+
+| Field | What to set |
+| --- | --- |
+| `paths.hf_home` | Hugging Face cache root; default `./cache/huggingface`. |
+| `data.cache_dir` | Prepared dataset cache root. Leave `null` to use `<paths.hf_home>/datasets`. |
+| `data.train_prepared_dir`, `data.test_prepared_dir` | Optional paths to specific prepared cache directories containing `dataset_info.json`, if multiple versions are available. |
+
+Once the cache is ready, continue with [Data Preprocessing](../data_preprocessing/README.md).

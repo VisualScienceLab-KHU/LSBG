@@ -20,7 +20,7 @@ DOMAIN_NAMES = {
     "avg_stats": "06_AVG",
     "avg_without_sd15": "07_OOD_Avg",
 }
-VALIDATION_SECTIONS = ("val_pixel", "val_image")
+VALIDATION_SECTIONS = ("val_pixel_P", "val_pixel_PF", "val_image")
 LOSS_WEIGHTS = {
     "loss_ce": "ce_w",
     "loss_rank": "rank_w",
@@ -67,9 +67,13 @@ def epoch_scalars(stats):
     ordered = [split for split in DOMAIN_NAMES if split in results]
     extras = sorted(set(results) - set(DOMAIN_NAMES))
     labels = {**DOMAIN_NAMES, **{split: f"{index:02d}_{split}" for index, split in enumerate(extras, 8)}}
-    for section, kind in (("val_pixel", "pixel"), ("val_image", "image")):
+    for section, kind, metric in (
+        ("val_pixel_P", "pixel_p", "pixel_f1"),
+        ("val_pixel_PF", "pixel_pf", "entire_pixel_f1"),
+        ("val_image", "image", "image_f1"),
+    ):
         for split in (*ordered, *extras):
-            values[f"{section}/{labels[split]}_F1"] = results[split][kind][f"{kind}_f1"]
+            values[f"{section}/{labels[split]}_F1"] = results[split][kind][metric]
     return _finite_scalars(values)
 
 

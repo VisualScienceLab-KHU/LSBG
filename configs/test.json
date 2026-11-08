@@ -15,7 +15,7 @@
     "threshold": 0.5
   },
   "paths": {
-    "checkpoint": "./outputs/regflow/best.pth",
+    "checkpoint": "",
     "output_dir": "./outputs/test"
   }
 }

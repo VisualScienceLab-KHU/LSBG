@@ -1,4 +1,5 @@
 import json
+import math
 import time
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from .data import (
     DistributedEvalSampler,
     OpenSDIDataset,
 )
-from .engine import accumulate_metrics, evaluate, train_epoch
+from .engine import accumulate_metrics, train_epoch
 from .metrics import Metrics, average_domains
 from .models import ReGFLoW
 from .runtime import seed_worker
@@ -88,7 +89,7 @@ def _prepare_training_output(config, runtime):
             existing = any(
                 (output / name).exists()
                 for name in ("last.pth", "best.pth", "resolved_config.json", "history.jsonl")
-            )
+            ) or bool(list(output.glob("epoch-*.pth")))
             resume = config["training"]["resume"]
             same_run = bool(resume) and Path(resume).resolve().parent == output.resolve()
             if existing and not same_run:
@@ -119,6 +120,11 @@ def _save_training_config(config, runtime):
 
 
 def validate_domains(model, loaders, config, runtime):
+    """Evaluate P, P+F and image-level metrics using one model pass per image.
+
+    P uses mean per-image F1 on partially edited images. P+F pools TP/FP/FN
+    over partially edited and fully synthetic images, as in test().
+    """
     settings = config["validation"]
     overrides = settings["model_overrides"]
     previous = {name: getattr(model, name) for name in overrides}
@@ -127,23 +133,28 @@ def validate_domains(model, loaders, config, runtime):
         for name, value in overrides.items():
             setattr(model, name, value)
         for split in config["data"]["test_splits"]:
-            pixel_scores = evaluate(
-                model,
-                loaders[split]["pixel"],
-                runtime,
-                pixel_mode="per_image",
-                threshold=settings["threshold"],
-                max_batches=settings["max_batches"],
-            )
-            image_scores = evaluate(
-                model,
-                loaders[split]["image"],
-                runtime,
-                image_metrics=True,
-                threshold=settings["threshold"],
-                max_batches=settings["max_batches"],
-            )
-            results[split] = {"pixel": pixel_scores, "image": image_scores}
+            pixel_p = Metrics(runtime.device, pixel_mode="per_image", threshold=settings["threshold"])
+            pixel_pf = Metrics(runtime.device, pixel_mode="entire_pixel", threshold=settings["threshold"])
+            image = Metrics(runtime.device, image=True, threshold=settings["threshold"])
+            metrics_by_class = {
+                "partial": (pixel_p, image),
+                "fully": (pixel_pf, image),
+                "real": (image,),
+            }
+            for category in TEST_CATEGORIES:
+                accumulate_metrics(
+                    model,
+                    loaders[split][category],
+                    runtime,
+                    *metrics_by_class[category],
+                    max_batches=settings["max_batches"],
+                )
+            pixel_pf.include_pixels(pixel_p)
+            results[split] = {
+                "pixel_p": pixel_p.compute(),
+                "pixel_pf": pixel_pf.compute(),
+                "image": image.compute(),
+            }
             runtime.print(f"Validation {split}: {json.dumps(results[split], sort_keys=True)}")
     finally:
         for name, value in previous.items():
@@ -164,12 +175,14 @@ def train(config, runtime):
     loader = build_loader(dataset, config["training"]["batch_size"], config, runtime, training=True)
     validation_loaders = {}
     for split in config["data"]["test_splits"]:
-        pixel_dataset = build_dataset(config, split, classes=["partial"])
-        image_dataset = build_dataset(config, split, load_masks=False)
-        validation_loaders[split] = {
-            "pixel": build_loader(pixel_dataset, validation["batch_size"], config, runtime),
-            "image": build_loader(image_dataset, validation["batch_size"], config, runtime),
-        }
+        validation_loaders[split] = {}
+        for category in TEST_CATEGORIES:
+            subset = build_dataset(
+                config, split, classes=[category], load_masks=category != "real"
+            )
+            validation_loaders[split][category] = build_loader(
+                subset, validation["batch_size"], config, runtime
+            )
     resume_path = config["training"]["resume"]
     checkpoint = read_checkpoint(resume_path) if resume_path else None
     model = build_model(config, runtime, checkpoint)
@@ -200,7 +213,7 @@ def train(config, runtime):
     _prepare_training_output(config, runtime)
     runtime.print(
         f"Train: {len(dataset)} images ({len(dataset.real_indices)} real, {len(dataset.fake_indices)} fake); "
-        f"validation images by domain (pixel=partial; image=all): "
+        f"validation images by domain (pixel P/P+F; image=all): "
         f"{ {split: {kind: len(item.dataset) for kind, item in loaders.items()} for split, loaders in validation_loaders.items()} }."
     )
     effective_batch = (
@@ -248,11 +261,16 @@ def train(config, runtime):
                 ),
             }
             stats["validation"] = validate_domains(model, validation_loaders, config, runtime)
-            selection_split = validation["selection_split"]
-            selected_f1 = stats["validation"][selection_split]["pixel"]["pixel_f1"]
+            ood = stats["validation"]["avg_without_sd15"]
+            if "pixel_p" not in ood:
+                raise ValueError("Checkpoint selection requires at least one non-SD1.5 test split.")
+            selected_f1 = float(ood["pixel_p"]["pixel_f1"])
+            if not math.isfinite(selected_f1):
+                raise ValueError("OOD Avg Pixel P F1 must be finite for checkpoint selection.")
             is_best = selected_f1 > best_metric
-            best_metric = max(best_metric, selected_f1)
-            stats["best_pixel_f1"] = best_metric
+            if is_best:
+                best_metric = selected_f1
+            stats["best_ood_pixel_p_f1"] = best_metric
             if config["training"]["save_checkpoints"]:
                 save_training_checkpoint(
                     model, optimizer, scaler, epoch, best_metric, config, runtime, is_best=is_best
@@ -263,7 +281,8 @@ def train(config, runtime):
                     handle.write(json.dumps(stats, allow_nan=False) + "\n")
             tracker.log_epoch(stats)
             runtime.print(
-                f"Completed epoch {epoch + 1}; best {selection_split} partial pixel F1={best_metric:.6f}."
+                f"Completed epoch {epoch + 1}; OOD Avg Pixel P F1={selected_f1:.6f}, "
+                f"best={best_metric:.6f}."
             )
     runtime.print(
         f"Training completed in {(time.monotonic() - start) / 3600:.2f} hours. Output: {config['paths']['output_dir']}"
@@ -345,7 +364,8 @@ def check_inputs(config, *, inspect_data=False):
         requests.append((config["data"]["train_split"], True, None, False))
         for split in config["data"]["test_splits"]:
             requests.append((split, False, ["partial"], True))
-            requests.append((split, False, None, False))
+            requests.append((split, False, ["fully"], True))
+            requests.append((split, False, ["real"], False))
     else:
         for split in config["data"]["test_splits"]:
             for category in TEST_CATEGORIES:
