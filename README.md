@@ -46,7 +46,7 @@ Prepare a VAE reconstruction-error map for each training and evaluation image. E
 
 ## Pretrained Models
 
-ReGFLoW initializes its visual encoders from **MAE ViT-Base** and **OpenAI CLIP ViT-L/14**. Download the official checkpoints following the instructions under `weights/`.
+ReGFLoW uses pretrained models for feature extraction. Download the official checkpoints following the instructions under `weights/`.
 
 **[Pretrained model setup and backbone roles](weights/README.md)**
 
