@@ -62,11 +62,7 @@ wandb login  # Required once for online W&B logging
 bash train.sh --config configs/train.json
 ```
 
-`--check` checks the required files and sample formats without training. For four-GPU training, set `runtime.num_processes` to `4` and allocate four GPUs; for example, with Slurm:
-
-```bash
-sbatch --ntasks=1 --gres=gpu:4 train.sh --config configs/train.json
-```
+`--check` checks the required files and sample formats without training. 
 
 Training checkpoints are saved under `paths.output_dir` (default: `./outputs/regflow/`). To resume training, set `training.resume` to the run's `last.pth`.
 
