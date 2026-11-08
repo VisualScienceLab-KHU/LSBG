@@ -15,7 +15,9 @@ secrets*.json
 *.pem
 configs/*.local.json
 cache/
-weights/
+# Track the setup guide while ignoring downloaded model weights.
+weights/*
+!weights/README.md
 outputs/
 wandb/
 logs/
